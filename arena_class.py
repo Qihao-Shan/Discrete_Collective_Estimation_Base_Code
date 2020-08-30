@@ -13,7 +13,7 @@ SAMPLE_NUM = 10
 # COST_FACTOR = -1.
 
 class epuck:
-    def __init__(self, init_option):
+    def __init__(self):
         # constants
         self.vl = 0.16
         self.va = 0.75
@@ -26,28 +26,36 @@ class epuck:
         self.walk_state = int(random.random() * 2)
         self.walk_timer = 0
         # decision
-        self.diss_state = 0
-        self.option = init_option
+        # self.diss_state = 0
+        # self.option = init_option
+
+class DM_object_DC:
+    def __init__(self, hypotheses, N=20):
+        self.decisions = np.random.choice(range(hypotheses.size), N)
+        print('initialise decisions ', self.decisions)
 
 class arena:
-    def __init__(self, hypotheses, N=20, dim=np.array([2, 2]), axis=None):
+    def __init__(self, hypotheses, dm_strat, N=20, dim=np.array([2, 2]), axis=None):
         self.robots = []
         self.coo_array = np.array([]).reshape([0, 2])
-        self.dir_v_array = np.array([]).reshape([0, 2])
         self.n = float(N)
         self.dim = dim
-        self.global_gain = 0.
-        self.local_gain_array = np.zeros(N)
-        self.sum_dec = 0
-        self.evaluation_num = 0
         for i in range(N):
             coo = np.array([random.random(), random.random()] * self.dim)
+            self.robots.append(epuck())
             while self.init_collision_detect(coo):
                 coo = np.array([random.random(), random.random()] * self.dim)
                 print('new position', i, coo)
-            self.robots.append(epuck(init_option=np.random.choice(hypotheses)))
             self.coo_array = np.vstack((self.coo_array, coo))
         self.axis = axis
+        if dm_strat == 'DC':
+            self.dm_object = DM_object_DC(hypotheses, N)
+        elif dm_strat == 'DMVD':
+            pass
+        elif dm_strat == 'DMMD':
+            pass
+        else:
+            pass
 
     def oob(self, coo):
         # out of bound
@@ -55,17 +63,20 @@ class arena:
                 and self.robots[0].r < coo[1] < self.dim[1] - self.robots[0].r:
             return False
         else:
+            print('oob ', coo)
             return True
 
     def init_collision_detect(self, new_coo):
         # check if new_coo clip with any old coo, or oob
         if self.oob(new_coo):
             return True
-        elif len(self.robots) == 0:
+        elif len(self.robots) == 1:
             return False
         else:
             dist_array = np.sqrt(np.sum((self.coo_array - new_coo) ** 2, axis=1))
             if np.min(dist_array) < 2 * self.robots[0].r:
+                print(dist_array)
+                print('collision ')
                 return True
             else:
                 return False
@@ -132,16 +143,10 @@ class arena:
             self.axis[0, 1].cla()
             self.axis[1, 0].cla()
             self.axis[1, 1].cla()
-            self.axis[0, 1].set_ylim([0, 1])
+            self.axis[0, 1].set_ylim([0, 5])
 
             self.axis[0, 0].plot(self.coo_array[:, 0], self.coo_array[:, 1], 'ro')
-            self.axis[1, 0].plot(self.coo_array[:, 0], self.coo_array[:, 1], 'bo')
-            for i in range(len(self.robots)):
-                if self.robots[i].diss_state == 1:
-                    self.axis[0, 0].plot(self.robots[i].coo[0], self.robots[i].coo[1], 'bo')
-                self.axis[0, 0].plot([self.robots[i].coo[0], self.robots[i].coo[0] + self.robots[i].dir_v[0] * 0.1],
-                                  [self.robots[i].coo[1], self.robots[i].coo[1] + self.robots[i].dir_v[1] * 0.1])
-                self.axis[0, 1].plot(i, self.robots[i].option, 'r*')
+            self.axis[0, 1].plot(self.dm_object.decisions, 'r*')
             self.axis[0, 0].axis('equal')
             self.axis[0, 0].set(xlim=(0, self.dim[0]), ylim=(0, self.dim[1]))
             self.axis[1, 0].axis('equal')
