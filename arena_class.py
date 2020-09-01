@@ -29,7 +29,7 @@ class epuck:
 
 
 class DM_object_DC:
-    def __init__(self, tile_array, hypotheses, exp_length, diss_length, comm_dist, N=20):
+    def __init__(self, tile_array, hypotheses, exp_length, diss_length, resample_prob, comm_dist, N=20):
         self.tile_array = tile_array
         self.decision_array = np.random.choice(range(hypotheses.size), N)
         self.hypotheses = hypotheses
@@ -45,15 +45,17 @@ class DM_object_DC:
         self.neighbour_decision_mat = -np.ones((N,N))
         self.neighbour_quality_mat = -100*np.ones((N,N))
         self.comm_dist = comm_dist
+        self.resample_prob = resample_prob
 
-    def make_decision(self, coo_array):
+    def make_decision(self, robots, coo_array):
         self.diss_timer_array -= 1
         for i in range(self.n):
             if self.diss_state_array[i] == 0:
                 # exploration
-                colour = self.tile_array[int(coo_array[i, 0]/0.1), int(coo_array[i, 1]/0.1)]
-                observation = np.array([colour, 1 - colour])
-                self.observation_array[i, :] += observation
+                if robots[i].walk_state == 0:
+                    colour = self.tile_array[int(coo_array[i, 0]/0.1), int(coo_array[i, 1]/0.1)]
+                    observation = np.array([colour, 1 - colour])
+                    self.observation_array[i, :] += observation
                 p = self.hypotheses[self.decision_array[i]]
                 N = self.observation_array[i, 0] + self.observation_array[i, 1]
                 k = self.observation_array[i, 0]
@@ -76,10 +78,17 @@ class DM_object_DC:
                     self.neighbour_quality_mat[i, :] = -100*np.ones(self.n)
                     self.diss_timer_array[i] = np.random.exponential(scale=self.exp_length)
                     self.diss_state_array[i] = 0
+                    r = random.random()
+                    if r < self.resample_prob:
+                        available = np.array([self.decision_array[i]-1, self.decision_array[i]+1])
+                        available = available[available < self.hypotheses.size]
+                        available = available[0 <= available]
+                        self.decision_array[i] = np.random.choice(available)
+                        print('resample ', i, self.decision_array[i])
 
 
 class arena:
-    def __init__(self, fill_ratio, pattern, hypotheses, dm_strat, exp_length, diss_length, N=20, dim=np.array([2, 2]), axis=None):
+    def __init__(self, fill_ratio, pattern, hypotheses, dm_strat, exp_length, diss_length, resample_prob, N=20, dim=np.array([2, 2]), axis=None):
         # initialise arena
         self.length = int(dim[0]/0.1)
         self.width = int(dim[1]/0.1)
@@ -97,8 +106,9 @@ class arena:
                 #print('new position', i, coo)
             self.coo_array = np.vstack((self.coo_array, coo))
         self.axis = axis
+        self.hypotheses = hypotheses
         if dm_strat == 'DC':
-            self.dm_object = DM_object_DC(self.tile_array, hypotheses, exp_length, diss_length, self.robots[0].comm_dist, N)
+            self.dm_object = DM_object_DC(self.tile_array, hypotheses, exp_length, diss_length, resample_prob, self.robots[0].comm_dist, N)
         elif dm_strat == 'DMVD':
             pass
         elif dm_strat == 'DMMD':
@@ -176,7 +186,7 @@ class arena:
             self.axis[0, 0].cla()
             self.axis[0, 1].cla()
             self.axis[1, 0].cla()
-            self.axis[0, 1].set_ylim([-1, 4])
+            self.axis[0, 1].set_ylim([-1, len(self.hypotheses)])
 
             self.axis[0, 0].set_title('timestep '+str(t_step))
             for i in range(self.width):
@@ -195,8 +205,8 @@ class arena:
             self.axis[0, 1].plot(self.dm_object.decision_array, 'r*')
             self.axis[0, 0].set(xlim=(0, self.dim[0]), ylim=(0, self.dim[1]))
             self.axis[0, 0].set_aspect('equal', adjustable='box')
-            self.axis[1, 0].plot(self.dm_object.decision_array, self.dm_object.quality_array, 'o')
-            self.axis[1, 0].set(xlim=(-1, 4))
+            self.axis[1, 0].plot(self.hypotheses[self.dm_object.decision_array], self.dm_object.quality_array, 'o')
+            self.axis[1, 0].set(xlim=(0, 1))
 
             plt.draw()
             plt.pause(0.001)
