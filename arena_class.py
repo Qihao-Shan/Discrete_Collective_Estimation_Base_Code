@@ -29,35 +29,53 @@ class epuck:
 
 
 class DM_object_DC:
-    def __init__(self, tile_array, hypotheses, exp_length, diss_length, N=20):
+    def __init__(self, tile_array, hypotheses, exp_length, diss_length, comm_dist, N=20):
         self.tile_array = tile_array
-        self.decisions = np.random.choice(range(hypotheses.size), N)
+        self.decision_array = np.random.choice(range(hypotheses.size), N)
         self.hypotheses = hypotheses
         #print('initialise decisions ', self.decisions)
         self.diss_state_array = np.zeros(N)
         self.n = N
         self.exp_length = exp_length
         self.diss_length = diss_length
-        self.diss_timer = np.random.exponential(scale=self.exp_length)
+        self.diss_timer_array = np.random.exponential(scale=self.exp_length, size=N)
         self.observation_array = np.zeros((N, 2))
         self.quality_array = np.zeros(N)
+        self.neighbour_mat = np.zeros((N,N))
+        self.neighbour_decision_mat = -np.ones((N,N))
+        self.neighbour_quality_mat = -100*np.ones((N,N))
+        self.comm_dist = comm_dist
 
     def make_decision(self, coo_array):
+        self.diss_timer_array -= 1
         for i in range(self.n):
             if self.diss_state_array[i] == 0:
                 # exploration
-                colour = self.tile_array[int(coo_array[i, 0]), int(coo_array[i, 1])]
+                colour = self.tile_array[int(coo_array[i, 0]/0.1), int(coo_array[i, 1]/0.1)]
                 observation = np.array([colour, 1 - colour])
                 self.observation_array[i, :] += observation
-                p = self.hypotheses[self.decisions]
+                p = self.hypotheses[self.decision_array[i]]
                 N = self.observation_array[i, 0] + self.observation_array[i, 1]
                 k = self.observation_array[i, 0]
                 self.quality_array[i] = comb(N, k) * p ** k * (1 - p) ** (N - k)
+                if self.diss_timer_array[i] < 0:
+                    self.diss_timer_array[i] = np.random.exponential(scale=self.diss_length)
+                    self.diss_state_array[i] = 1
             else:
                 # dissemination
-                pass
                 # collect opinions
+                dist_array = np.sqrt(np.sum((coo_array - coo_array[i, :])**2, axis=1))
+                self.neighbour_mat[i, dist_array <= self.comm_dist] = 1
+                self.neighbour_decision_mat[i, dist_array <= self.comm_dist] = self.decision_array[dist_array <= self.comm_dist]
+                self.neighbour_quality_mat[i, dist_array <= self.comm_dist] = self.quality_array[dist_array <= self.comm_dist]
                 # make decision
+                if self.diss_timer_array[i] < 0:
+                    self.decision_array[i] = self.neighbour_decision_mat[i, np.argmax(self.neighbour_quality_mat[i, :])]
+                    self.neighbour_mat[i, :] = np.zeros(self.n)
+                    self.neighbour_decision_mat[i, :] = -np.ones(self.n)
+                    self.neighbour_quality_mat[i, :] = -100*np.ones(self.n)
+                    self.diss_timer_array[i] = np.random.exponential(scale=self.exp_length)
+                    self.diss_state_array[i] = 0
 
 
 class arena:
@@ -80,7 +98,7 @@ class arena:
             self.coo_array = np.vstack((self.coo_array, coo))
         self.axis = axis
         if dm_strat == 'DC':
-            self.dm_object = DM_object_DC(self.tile_array, hypotheses, exp_length, diss_length, N)
+            self.dm_object = DM_object_DC(self.tile_array, hypotheses, exp_length, diss_length, self.robots[0].comm_dist, N)
         elif dm_strat == 'DMVD':
             pass
         elif dm_strat == 'DMMD':
@@ -97,6 +115,7 @@ class arena:
             tiles[:int(tiles.size * fill_ratio)] = 1
             tiles = np.random.permutation(tiles)
             tiles = tiles.reshape((length, width))
+            print('num of black tiles ', np.sum(tiles))
             return tiles
 
     def oob(self, coo):
@@ -154,24 +173,30 @@ class arena:
 
     def plot_arena(self, t_step):
         if t_step % TSPF == 0:
-            self.axis.cla()
-            #self.axis[1].cla()
-            #self.axis[1].set_ylim([-1, 4])
+            self.axis[0, 0].cla()
+            self.axis[0, 1].cla()
+            self.axis[1, 0].cla()
+            self.axis[0, 1].set_ylim([-1, 4])
 
-            self.axis.set_title('timestep '+str(t_step))
+            self.axis[0, 0].set_title('timestep '+str(t_step))
             for i in range(self.width):
                 for j in range(self.length):
                     if self.tile_array[i, j] == 1:
-                        self.axis.fill_between([i*0.1, (i+1)*0.1], [j*0.1, j*0.1], [(j+1)*0.1, (j+1)*0.1], facecolor='k')
+                        self.axis[0, 0].fill_between([i*0.1, (i+1)*0.1], [j*0.1, j*0.1], [(j+1)*0.1, (j+1)*0.1], facecolor='k')
 
             for i in range(len(self.robots)):
                 circle = plt.Circle((self.coo_array[i, 0], self.coo_array[i, 1]), self.robots[0].r, color='r', fill=False)
-                self.axis.add_artist(circle)
-                self.axis.plot(np.array([self.coo_array[i, 0], self.coo_array[i, 0]+self.robots[i].dir_v[0]*0.05]), np.array([self.coo_array[i, 1], self.coo_array[i, 1]+self.robots[i].dir_v[1]*0.05]),'b')
-            self.axis.plot(self.coo_array[:, 0], self.coo_array[:, 1], 'ro', markersize=3)
-            #self.axis[1].plot(self.dm_object.decisions, 'r*')
-            self.axis.set(xlim=(0, self.dim[0]), ylim=(0, self.dim[1]))
-            self.axis.set_aspect('equal', adjustable='box')
+                self.axis[0, 0].add_artist(circle)
+                self.axis[0, 0].plot(np.array([self.coo_array[i, 0], self.coo_array[i, 0]+self.robots[i].dir_v[0]*0.05]), np.array([self.coo_array[i, 1], self.coo_array[i, 1]+self.robots[i].dir_v[1]*0.05]),'b')
+            self.axis[0, 0].plot(self.coo_array[self.dm_object.diss_state_array == 0, 0],
+                              self.coo_array[self.dm_object.diss_state_array == 0, 1], 'ro', markersize=3)
+            self.axis[0, 0].plot(self.coo_array[self.dm_object.diss_state_array == 1, 0],
+                              self.coo_array[self.dm_object.diss_state_array == 1, 1], 'bo', markersize=3)
+            self.axis[0, 1].plot(self.dm_object.decision_array, 'r*')
+            self.axis[0, 0].set(xlim=(0, self.dim[0]), ylim=(0, self.dim[1]))
+            self.axis[0, 0].set_aspect('equal', adjustable='box')
+            self.axis[1, 0].plot(self.dm_object.decision_array, self.dm_object.quality_array, 'o')
+            self.axis[1, 0].set(xlim=(-1, 4))
 
             plt.draw()
             plt.pause(0.001)
