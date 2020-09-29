@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 
 TIME_STEP = 0.01
 TSPF = 20
-SAMPLE_NUM = 10
 
 
 class epuck:
