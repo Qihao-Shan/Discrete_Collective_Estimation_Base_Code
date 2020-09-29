@@ -2,16 +2,12 @@ import random
 import numpy as np
 import math
 import matplotlib.pyplot as plt
-from scipy.special import comb
 
 
 TIME_STEP = 0.01
 TSPF = 20
-#EXP_SCALE = 0.02
 SAMPLE_NUM = 10
 
-
-# COST_FACTOR = -1.
 
 class epuck:
     def __init__(self):
@@ -28,71 +24,12 @@ class epuck:
         self.walk_timer = 0
 
 
-class DM_object_DC:
-    def __init__(self, tile_array, hypotheses, exp_length, diss_length, resample_prob, comm_dist, N=20):
-        self.tile_array = tile_array
-        self.decision_array = np.random.choice(range(hypotheses.size), N)
-        self.hypotheses = hypotheses
-        #print('initialise decisions ', self.decisions)
-        self.diss_state_array = np.zeros(N)
-        self.n = N
-        self.exp_length = exp_length
-        self.diss_length = diss_length
-        self.diss_timer_array = np.random.exponential(scale=self.exp_length, size=N)
-        self.observation_array = np.zeros((N, 2))
-        self.quality_array = np.zeros(N)
-        self.neighbour_mat = np.zeros((N,N))
-        self.neighbour_decision_mat = -np.ones((N,N))
-        self.neighbour_quality_mat = -100*np.ones((N,N))
-        self.comm_dist = comm_dist
-        self.resample_prob = resample_prob
-
-    def make_decision(self, robots, coo_array):
-        self.diss_timer_array -= 1
-        for i in range(self.n):
-            if self.diss_state_array[i] == 0:
-                # exploration
-                if robots[i].walk_state == 0:
-                    colour = self.tile_array[int(coo_array[i, 0]/0.1), int(coo_array[i, 1]/0.1)]
-                    observation = np.array([colour, 1 - colour])
-                    self.observation_array[i, :] += observation
-                p = self.hypotheses[self.decision_array[i]]
-                N = self.observation_array[i, 0] + self.observation_array[i, 1]
-                k = self.observation_array[i, 0]
-                self.quality_array[i] = comb(N, k) * p ** k * (1 - p) ** (N - k)
-                if self.diss_timer_array[i] < 0:
-                    self.diss_timer_array[i] = np.random.exponential(scale=self.diss_length)
-                    self.diss_state_array[i] = 1
-            else:
-                # dissemination
-                # collect opinions
-                dist_array = np.sqrt(np.sum((coo_array - coo_array[i, :])**2, axis=1))
-                self.neighbour_mat[i, dist_array <= self.comm_dist] = 1
-                self.neighbour_decision_mat[i, dist_array <= self.comm_dist] = self.decision_array[dist_array <= self.comm_dist]
-                self.neighbour_quality_mat[i, dist_array <= self.comm_dist] = self.quality_array[dist_array <= self.comm_dist]
-                # make decision
-                if self.diss_timer_array[i] < 0:
-                    self.decision_array[i] = self.neighbour_decision_mat[i, np.argmax(self.neighbour_quality_mat[i, :])]
-                    self.neighbour_mat[i, :] = np.zeros(self.n)
-                    self.neighbour_decision_mat[i, :] = -np.ones(self.n)
-                    self.neighbour_quality_mat[i, :] = -100*np.ones(self.n)
-                    self.diss_timer_array[i] = np.random.exponential(scale=self.exp_length)
-                    self.diss_state_array[i] = 0
-                    r = random.random()
-                    if r < self.resample_prob:
-                        available = np.array([self.decision_array[i]-1, self.decision_array[i]+1])
-                        available = available[available < self.hypotheses.size]
-                        available = available[0 <= available]
-                        self.decision_array[i] = np.random.choice(available)
-                        print('resample ', i, self.decision_array[i])
-
-
 class arena:
-    def __init__(self, fill_ratio, pattern, hypotheses, dm_strat, exp_length, diss_length, resample_prob, N=20, dim=np.array([2, 2]), axis=None):
+    def __init__(self, fill_ratio, pattern, block_mean_width, block_std_width, hypotheses, dm_object, N=20, dim=np.array([2, 2]), axis=None):
         # initialise arena
         self.length = int(dim[0]/0.1)
         self.width = int(dim[1]/0.1)
-        self.tile_array = self.generate_pattern(self.length, self.width, fill_ratio, pattern)
+        self.tile_array = self.generate_pattern(self.length, self.width, fill_ratio, pattern, block_mean_width, block_std_width)
         # initialise agents
         self.robots = []
         self.coo_array = np.array([]).reshape([0, 2])
@@ -107,26 +44,39 @@ class arena:
             self.coo_array = np.vstack((self.coo_array, coo))
         self.axis = axis
         self.hypotheses = hypotheses
-        if dm_strat == 'DC':
-            self.dm_object = DM_object_DC(self.tile_array, hypotheses, exp_length, diss_length, resample_prob, self.robots[0].comm_dist, N)
-        elif dm_strat == 'DMVD':
-            pass
-        elif dm_strat == 'DMMD':
-            pass
-        else:
-            pass
+        self.dm_object = dm_object
+        self.dm_object.tile_array = self.tile_array
+        self.dm_object.comm_dist = self.robots[0].comm_dist
 
-    def generate_pattern(self, length, width, fill_ratio, pattern):
+    def generate_pattern(self, length, width, fill_ratio, pattern, block_mean_width, block_std_width):
+        tiles = np.zeros(width * length)
         if pattern == 'Block':
-            pass
+            tiles = tiles.reshape((length, width))
+            target_black_tiles = round(width * length * fill_ratio)
+            # put blocks
+            while target_black_tiles-np.sum(tiles) > 0:
+                block_width = abs(round(np.random.normal(block_mean_width, block_std_width)))
+                if target_black_tiles-np.sum(tiles) - block_width**2 > -20 or \
+                        target_black_tiles-np.sum(tiles) - block_width**2 > -(block_mean_width - 3 * block_std_width)**2:
+                    pos = [int(random.random()*(length-block_width)), int(random.random()*(width-block_width))]
+                    pos_end = [min(pos[0]+block_width, length), min(pos[1]+block_width, width)]
+                    tiles[pos[0]:pos_end[0], pos[1]:pos_end[1]] = 1
+            # randomly distributing remaining black tiles
+            if target_black_tiles > np.sum(tiles):
+                while target_black_tiles > np.sum(tiles):
+                    pos = [int(random.random()*length), int(random.random()*width)]
+                    tiles[pos[0], pos[1]] = 1
+            elif target_black_tiles < np.sum(tiles):
+                while target_black_tiles < np.sum(tiles):
+                    pos = [int(random.random() * length), int(random.random() * width)]
+                    tiles[pos[0], pos[1]] = 0
         else:
             # random
-            tiles = np.zeros(width * length)
             tiles[:int(tiles.size * fill_ratio)] = 1
             tiles = np.random.permutation(tiles)
             tiles = tiles.reshape((length, width))
-            print('num of black tiles ', np.sum(tiles))
-            return tiles
+        print('num of black tiles ', np.sum(tiles))
+        return tiles
 
     def oob(self, coo):
         # out of bound
@@ -146,8 +96,6 @@ class arena:
         else:
             dist_array = np.sqrt(np.sum((coo_array - new_coo) ** 2, axis=1))
             if np.min(dist_array) < 2 * self.robots[0].r:
-                #print(dist_array)
-                #print('collision ')
                 return True
             else:
                 return False
@@ -186,6 +134,7 @@ class arena:
             self.axis[0, 0].cla()
             self.axis[0, 1].cla()
             self.axis[1, 0].cla()
+            self.axis[1, 1].cla()
             self.axis[0, 1].set_ylim([-1, len(self.hypotheses)])
 
             self.axis[0, 0].set_title('timestep '+str(t_step))
@@ -205,8 +154,11 @@ class arena:
             self.axis[0, 1].plot(self.dm_object.decision_array, 'r*')
             self.axis[0, 0].set(xlim=(0, self.dim[0]), ylim=(0, self.dim[1]))
             self.axis[0, 0].set_aspect('equal', adjustable='box')
-            self.axis[1, 0].plot(self.hypotheses[self.dm_object.decision_array], self.dm_object.quality_array, 'o')
-            self.axis[1, 0].set(xlim=(0, 1))
+
+            # strategy specific monitoring, comment out if error
+            if self.dm_object.dm_type == 'dc':
+                self.axis[1, 0].plot(self.hypotheses[self.dm_object.decision_array], self.dm_object.quality_array, 'o')
+                self.axis[1, 0].set(xlim=(0, 1))
 
             plt.draw()
             plt.pause(0.001)
