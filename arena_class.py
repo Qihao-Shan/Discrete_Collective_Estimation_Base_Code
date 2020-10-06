@@ -49,7 +49,7 @@ class arena:
 
     def generate_pattern(self, length, width, fill_ratio, pattern, block_mean_width, block_std_width):
         tiles = np.zeros(width * length)
-        if pattern == 'Block':
+        if pattern == 'Block' and block_mean_width > 1:
             tiles = tiles.reshape((length, width))
             target_black_tiles = round(width * length * fill_ratio)
             # put blocks
@@ -64,11 +64,13 @@ class arena:
             if target_black_tiles > np.sum(tiles):
                 while target_black_tiles > np.sum(tiles):
                     pos = [int(random.random()*length), int(random.random()*width)]
-                    tiles[pos[0], pos[1]] = 1
+                    if self.check_neighbouring_tiles(tiles, pos, 1):
+                        tiles[pos[0], pos[1]] = 1
             elif target_black_tiles < np.sum(tiles):
                 while target_black_tiles < np.sum(tiles):
                     pos = [int(random.random() * length), int(random.random() * width)]
-                    tiles[pos[0], pos[1]] = 0
+                    if self.check_neighbouring_tiles(tiles, pos, 0):
+                        tiles[pos[0], pos[1]] = 0
         else:
             # random
             tiles[:int(tiles.size * fill_ratio)] = 1
@@ -76,6 +78,15 @@ class arena:
             tiles = tiles.reshape((length, width))
         print('num of black tiles ', np.sum(tiles))
         return tiles
+
+    def check_neighbouring_tiles(self, tiles, coo, value):
+        appended_tile_array = np.ones((self.length + 2, self.width + 2)) * (1 - value)
+        appended_tile_array[1:self.length + 1, 1:self.width + 1] = tiles
+        vicinity_block = appended_tile_array[coo[0]:coo[0]+3, coo[1]:coo[1]+3]
+        if np.any(vicinity_block == value):
+            return True
+        else:
+            return False
 
     def oob(self, coo):
         # out of bound

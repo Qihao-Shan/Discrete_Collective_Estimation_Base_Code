@@ -8,7 +8,7 @@ hypotheses = np.array([0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.9
 resample_prob = 0.02
 dm_ob = dm_objects.DM_object_DC(hypotheses, exp_length=1, diss_length=1, resample_prob=resample_prob)
 #dm_ob = dm_objects.DM_object_individual(hypotheses)
-a = arena(0.45, 'Random', 15, 3, hypotheses, dm_ob, axis=axis)
+a = arena(0.45, 'Random', 12, 1, hypotheses, dm_ob, axis=axis)
 
 Max_step = 30000
 
